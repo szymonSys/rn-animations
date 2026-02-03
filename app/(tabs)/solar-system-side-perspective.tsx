@@ -1,10 +1,10 @@
-import { Text } from "react-native";
 import GenericView from "@/components/ui/generic-view";
+import SolarSystemSidePerspective from "@/components/solar-system-side-perspective";
 
-export default function SolarSystemSidePerspective() {
+export default function SolarSystemSidePerspectiveView() {
   return (
     <GenericView>
-      <Text>Solar System Side Perspective</Text>
+      <SolarSystemSidePerspective isActive={true} />
     </GenericView>
   );
 }
