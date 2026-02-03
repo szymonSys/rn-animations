@@ -20,6 +20,12 @@ export default function TabLayout() {
           title: "Solar System Side Perspective",
         }}
       />
+      <Tabs.Screen
+        name="line-to-circle"
+        options={{
+          title: "Line to Circle",
+        }}
+      />
     </Tabs>
   );
 }
