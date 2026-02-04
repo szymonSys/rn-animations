@@ -1,125 +1,140 @@
+import { Point } from "@/utils/animation-utils.types";
 import { useEffect } from "react";
 import { View, StyleSheet, Dimensions, Button } from "react-native";
 import Animated, {
-  Easing,
-  Extrapolation,
-  interpolate,
   useAnimatedProps,
   useSharedValue,
-  withSequence,
   withTiming,
 } from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const VIEW_BOX = `0 0 ${SCREEN_WIDTH / 3} ${SCREEN_WIDTH / 3}`;
+const CENTER_X = SCREEN_WIDTH / 3;
+const VIEW_BOX = `0 0 ${CENTER_X} ${CENTER_X}`;
 
-// TARGET PATH DATA -> "M 20,50 A 45,45 0 0 1 110,50 M 20,50 A 45,45 0 0 0 65,95 M 110,50 A 45,45 0 0 1 65,95";
-
-const TARGET_RADIUS = 45;
-
-const Y_START = 20,
-  Y_END = Y_START + TARGET_RADIUS;
-
-const X_START = 20,
-  X_MIDDLE = X_START + TARGET_RADIUS,
-  X_END = X_START + TARGET_RADIUS * 2;
-
-const MAX_RADIUS = 100000;
+const TARGET_RADIUS = 30;
+const LINE_LENGTH = 2 * Math.PI * TARGET_RADIUS;
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
+function _normalizeOffset(_offset: Point | number): Point {
+  "worklet";
+  return typeof _offset === "number" ? { x: _offset, y: _offset } : _offset;
+}
+
+function calculateBendingBreakpoints(
+  progress: number,
+  arcLengthMultiplier: number = 0.6,
+  finalRadius: number = TARGET_RADIUS,
+  finalCenter: Point | number = CENTER_X / 2,
+  numberOfBreakpoints: number = 100
+): Point[] {
+  "worklet";
+  const clampedProgress = Math.max(progress, 0.005);
+  const arcLength = 2 * Math.PI * finalRadius;
+  const minArcLength = arcLength * arcLengthMultiplier;
+  const scaledArcLength =
+    minArcLength + (arcLength - minArcLength) * clampedProgress;
+  const totalAngle = 2 * Math.PI * clampedProgress;
+  const currentRadius = scaledArcLength / totalAngle;
+  const normalizedCenter = _normalizeOffset(finalCenter);
+  const arcCenterX = normalizedCenter.x;
+  const arcCenterY = normalizedCenter.y - finalRadius + currentRadius;
+
+  const startAngle = -Math.PI / 2 - totalAngle / 2;
+
+  const breakpoints: Point[] = [];
+  for (let i = 0; i <= numberOfBreakpoints; i++) {
+    const t = i / numberOfBreakpoints;
+    const angle = startAngle + t * totalAngle;
+    breakpoints.push({
+      x: Math.cos(angle) * currentRadius + arcCenterX,
+      y: Math.sin(angle) * currentRadius + arcCenterY,
+    });
+  }
+
+  return breakpoints;
+}
+
+function calculateLineBreakpoints(
+  length: number = LINE_LENGTH,
+  _center: Point | number = CENTER_X / 2,
+  angleDeg: number = 0,
+  numberOfBreakpoints: number = 100
+): Point[] {
+  "worklet";
+  const angleRad = (angleDeg * Math.PI) / 180;
+  const breakpoints: Point[] = [];
+  const center = _normalizeOffset(_center);
+  for (let i = 0; i <= numberOfBreakpoints; i++) {
+    const t = i / numberOfBreakpoints;
+    const x = center.x - length * 0.5 + Math.cos(angleRad) * length * t;
+    const y = center.y + Math.sin(angleRad) * length * t;
+    breakpoints.push({ x, y });
+  }
+  return breakpoints;
+}
+
+function calculateCircleBreakpoints(
+  maxAngleDeg: number = 360,
+  radius: number = TARGET_RADIUS,
+  center: Point | number = CENTER_X / 2,
+  numberOfBreakpoints: number = 100
+): Point[] {
+  "worklet";
+  const breakpoints: Point[] = [];
+  const angleMaxRad = (maxAngleDeg * Math.PI) / 180;
+  const offset = _normalizeOffset(center);
+  for (let i = 0; i <= numberOfBreakpoints; i++) {
+    const angle = (i / numberOfBreakpoints) * angleMaxRad;
+    const x = Math.cos(angle) * radius + offset.x;
+    const y = Math.sin(angle) * radius + offset.y;
+    breakpoints.push({ x, y });
+  }
+  return breakpoints;
+}
+
+function interpolateBreakpoints(
+  progress: number,
+  from: Point[],
+  to: Point[]
+): Point[] {
+  "worklet";
+  const interpolatedBreakpoints: Point[] = [];
+  for (let i = 0; i < from.length; i++) {
+    const fromPoint = from[i];
+    const toPoint = to[i];
+    const x = fromPoint.x + (toPoint.x - fromPoint.x) * progress;
+    const y = fromPoint.y + (toPoint.y - fromPoint.y) * progress;
+    interpolatedBreakpoints.push({ x, y });
+  }
+  return interpolatedBreakpoints;
+}
+
+function drawPath(breakpoints: Point[]): string {
+  "worklet";
+  let path = `M ${breakpoints[0].x},${breakpoints[0].y}`;
+  for (let i = 1; i < breakpoints.length; i++) {
+    path += ` L ${breakpoints[i].x},${breakpoints[i].y}`;
+  }
+  return path;
+}
+
+const CIRCLE_BREAKPOINTS = calculateCircleBreakpoints();
+const LINE_BREAKPOINTS = calculateLineBreakpoints(120);
+
 export function LineToCircle() {
-  const sharedRadius = useSharedValue(MAX_RADIUS);
-  const armAngleX = useSharedValue(0);
-  const armAngleY = useSharedValue(0);
+  const bendingProgress = useSharedValue(0);
   const animatedPathProps = useAnimatedProps(() => {
-    const radius = sharedRadius.get();
-    const armValueX = armAngleX.get();
-    const armValueY = armAngleY.get();
-
-    const leftArmX = interpolate(
-      armValueX,
-      [0, 100],
-      [X_START, X_MIDDLE],
-      Extrapolation.CLAMP
-    );
-    const rightArmX = interpolate(
-      armValueX,
-      [0, 100],
-      [X_END, X_MIDDLE],
-      Extrapolation.CLAMP
-    );
-    const leftArmY = interpolate(
-      armValueY,
-      [0, 100],
-      [Y_START, Y_END],
-      Extrapolation.CLAMP
-    );
-
-    const rightArmY = interpolate(
-      armValueY,
-      [0, 100],
-      [Y_START, Y_END],
-      Extrapolation.CLAMP
-    );
-
-    const yOffset = interpolate(
-      radius,
-      [MAX_RADIUS, TARGET_RADIUS],
-      [0, TARGET_RADIUS],
-      Extrapolation.CLAMP
-    );
-
-    const yPosition = Y_START + yOffset;
-
+    const path = drawPath(calculateBendingBreakpoints(bendingProgress.value));
     return {
-      d: `M ${X_START},${yPosition} 
-          A ${radius},${radius} 
-          0 0 1 
-          ${X_END},${yPosition}
-          M ${X_START},${yPosition} 
-          A ${radius},${radius} 
-          0 0 0 ${leftArmX},${leftArmY + yOffset} 
-          M ${X_END},${yPosition} 
-          A ${radius},${radius} 
-          0 0 1 
-          ${rightArmX},${rightArmY + yOffset}`,
+      d: path,
     };
   }, []);
 
   const startAnimation = () => {
-    sharedRadius.set(MAX_RADIUS);
-    armAngleY.set(0);
-    armAngleX.set(0);
-    sharedRadius.set(
-      withSequence(
-        withTiming(TARGET_RADIUS * 7, { duration: 300, easing: Easing.linear }),
-        withTiming(
-          TARGET_RADIUS + 25,
-          { duration: 300, easing: Easing.linear },
-          (finished) => {
-            if (finished) {
-              armAngleY.set(
-                withTiming(100, { duration: 600, easing: Easing.linear })
-              );
-            }
-          }
-        ),
-        withTiming(
-          TARGET_RADIUS + 10,
-          { duration: 300, easing: Easing.linear },
-          (finished) => {
-            if (finished) {
-              armAngleX.set(
-                withTiming(100, { duration: 300, easing: Easing.linear })
-              );
-            }
-          }
-        ),
-        withTiming(TARGET_RADIUS, { duration: 300, easing: Easing.linear })
-      )
-    );
+    bendingProgress.value = 0;
+    bendingProgress.value = withTiming(1, { duration: 3000 });
   };
 
   useEffect(() => {
