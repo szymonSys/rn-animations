@@ -26,6 +26,12 @@ export default function TabLayout() {
           title: "Line to Circle",
         }}
       />
+      <Tabs.Screen
+        name="bouncing-ball"
+        options={{
+          title: "Bouncing Ball",
+        }}
+      />
     </Tabs>
   );
 }

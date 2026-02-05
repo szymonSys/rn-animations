@@ -1,13 +1,12 @@
 import { StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
 export default function GenericView({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView style={styles.root} edges={["top", "left", "right"]}>
       <View style={styles.container}>{children}</View>
     </SafeAreaView>
   );
