@@ -20,6 +20,18 @@ export default function TabLayout() {
           title: "Solar System Side Perspective",
         }}
       />
+      <Tabs.Screen
+        name="line-to-circle"
+        options={{
+          title: "Line to Circle",
+        }}
+      />
+      <Tabs.Screen
+        name="bouncing-ball"
+        options={{
+          title: "Bouncing Ball",
+        }}
+      />
     </Tabs>
   );
 }
