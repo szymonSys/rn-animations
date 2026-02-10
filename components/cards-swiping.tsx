@@ -1,4 +1,9 @@
-import { View, Text, StyleSheet, Dimensions } from "react-native";
+import {
+  View,
+  StyleSheet,
+  Dimensions,
+  TouchableWithoutFeedback,
+} from "react-native";
 import Animated, {
   Extrapolation,
   clamp,
@@ -13,119 +18,170 @@ import Animated, {
 } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Image } from "expo-image";
-import { useMemo, useState } from "react";
+import {
+  PropsWithChildren,
+  createContext,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
 import { scheduleOnRN } from "react-native-worklets";
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+const CART_WIDTH = SCREEN_WIDTH * 0.85;
+const GAP_WIDTH = (SCREEN_WIDTH - CART_WIDTH) / 2;
+const CARD_OFFSET = CART_WIDTH + GAP_WIDTH;
 
 const AnimatedImage = Animated.createAnimatedComponent(Image);
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+export type CardSwipingProps<T extends { image: string }> = {
+  data: T[];
+  renderCard: (item: T, absoluteIndex: number) => React.ReactNode;
+  extractKey: (item: T) => number | string;
+  batchSize?: number;
+};
 
-const CART_WIDTH = SCREEN_WIDTH * 0.85;
-const GAP_WIDTH = (SCREEN_WIDTH - CART_WIDTH) / 2;
+type ContextType = {
+  getCurrentIndex: () => number;
+  scrollToIndex: (index: number) => void;
+  data: any[];
+  extractKey: (item: any) => number | string;
+};
 
-const CARD_OFFSET = CART_WIDTH + GAP_WIDTH;
+const CardsSwipingContext = createContext<ContextType>({
+  getCurrentIndex: () => 0,
+  scrollToIndex: () => {},
+  data: [],
+  extractKey: () => "",
+});
 
-const DATA = Array.from({ length: 1000 }, (_, index) => ({
-  id: index,
-  title: `Card ${index + 1}`,
-  description: `Description of card ${index + 1}`,
-  image: `https://picsum.photos/seed/${
-    index + 1
-  }/${SCREEN_WIDTH}/${SCREEN_HEIGHT}`,
-}));
-
-type ScrollContext = {};
-
-function calculateIndex(
-  offset: number,
-  min: number = 0,
-  max: number = DATA.length - 1
-) {
-  "worklet";
-  return clamp(Math.round(offset / CARD_OFFSET), min, max);
+function CardsSwipingProvider({
+  children,
+  ...props
+}: PropsWithChildren<ContextType>) {
+  return (
+    <CardsSwipingContext.Provider value={props}>
+      {children}
+    </CardsSwipingContext.Provider>
+  );
 }
 
-function calculateProgress(offset: number) {
-  "worklet";
-  const currentProgress = offset / CARD_OFFSET;
-  return currentProgress - Math.floor(currentProgress);
-}
+export default function CardsSwiping<Item extends { image: string }>({
+  data,
+  renderCard,
+  extractKey,
+  batchSize = 3,
+}: CardSwipingProps<Item>) {
+  const scrollViewRef = useAnimatedRef<Animated.ScrollView>();
 
-export default function CardsSwiping() {
   const startScrollOffset = useSharedValue(0);
   const scrollOffset = useSharedValue(0);
-  const scrollViewRef = useAnimatedRef<Animated.ScrollView>();
-  const currentImageIndex = useSharedValue(0);
+  const currentIndex = useSharedValue(0);
   const transitionProgress = useSharedValue(0);
+  const imageSourceMutex = useSharedValue(false);
+
   const [indexState, setIndexState] = useState(0);
+  const [imageSource, setImageSource] = useState(data[indexState].image);
 
   useAnimatedReaction(
-    () => currentImageIndex.value,
+    () => currentIndex.value,
     (value, prevValue) => {
       if (prevValue === null) {
         return;
       }
       scheduleOnRN(setIndexState, value);
+      if (!imageSourceMutex.value) {
+        scheduleOnRN(setImageSource, data[value].image);
+      }
     }
   );
+
+  function calculateIndex(
+    offset: number,
+    min: number = 0,
+    max: number = data.length - 1
+  ) {
+    "worklet";
+    return clamp(Math.round(offset / CARD_OFFSET), min, max);
+  }
+
+  function calculateTransition(offset: number) {
+    "worklet";
+    const currentProgress = offset / CARD_OFFSET;
+    return currentProgress - Math.floor(currentProgress);
+  }
+
+  function calculateScrollAnimationProgress(offset: number): number {
+    "worklet";
+    return withSpring(
+      clamp(offset, 0, CARD_OFFSET * (data.length - 1)),
+      undefined,
+      (finished) => {
+        if (finished) {
+          transitionProgress.value = 0;
+          imageSourceMutex.value = false;
+        }
+      }
+    );
+  }
 
   const panGesture = Gesture.Pan()
     .onBegin((e) => {
       const index = calculateIndex(scrollOffset.value);
       startScrollOffset.value = index * CARD_OFFSET;
-      currentImageIndex.value = index;
+      currentIndex.value = index;
     })
     .onUpdate((e) => {
       scrollOffset.value = Math.ceil(startScrollOffset.value - e.translationX);
     })
     .onFinalize((e) => {
       const difference = scrollOffset.value - startScrollOffset.value;
-      const direction = Math.sign(difference);
-      const newOffset = startScrollOffset.value + CARD_OFFSET * direction;
+      const index = calculateIndex(scrollOffset.value);
+      const newOffset = index * CARD_OFFSET;
       const shouldSnap = Math.abs(difference) > CART_WIDTH / 2;
       if (shouldSnap) {
-        scrollOffset.value = clamp(
-          newOffset,
-          0,
-          CARD_OFFSET * (DATA.length - 1)
-        );
+        scrollOffset.value = calculateScrollAnimationProgress(newOffset);
+        startScrollOffset.value = scrollOffset.value;
         return;
       }
-      scrollOffset.value = startScrollOffset.value;
+      scrollOffset.value = calculateScrollAnimationProgress(
+        startScrollOffset.value
+      );
     });
 
-  const scrollHandler = useAnimatedScrollHandler<ScrollContext>((event) => {
+  const scrollHandler = useAnimatedScrollHandler((event) => {
     const index = calculateIndex(event.contentOffset.x);
-    if (index !== currentImageIndex.value) {
-      currentImageIndex.value = index;
+    if (index !== currentIndex.value) {
+      currentIndex.value = index;
     }
-    transitionProgress.value = calculateProgress(event.contentOffset.x);
+    if (!imageSourceMutex.value) {
+      transitionProgress.value = calculateTransition(event.contentOffset.x);
+    }
   }, []);
 
   const scrollViewProps = useAnimatedProps(() => ({
     contentOffset: {
-      x: withSpring(scrollOffset.value),
+      x: scrollOffset.value,
       y: 0,
     },
   }));
 
   const cards = useMemo(() => {
     const start = Math.max(indexState - 1, 0);
-    const end = Math.min(start + 3, DATA.length - 1);
-    return DATA.slice(start, end).map((item, sliceIndex) => {
+    const end = Math.min(start + batchSize, data.length);
+    return data.slice(start, end).map((item, sliceIndex) => {
       const absoluteIndex = start + sliceIndex;
       const transformX = absoluteIndex * CARD_OFFSET;
       return (
         <Animated.View
           style={[styles.card, { transform: [{ translateX: transformX }] }]}
-          key={item.title}
+          key={extractKey(item)}
         >
-          <Text>{item.title}</Text>
-          <Text>{item.description}</Text>
+          {renderCard(item, absoluteIndex)}
         </Animated.View>
       );
     });
-  }, [indexState]);
+  }, [indexState, data, extractKey, renderCard, batchSize]);
 
   const imageProps = useAnimatedProps(() => {
     const blurRadius = interpolate(
@@ -135,7 +191,6 @@ export default function CardsSwiping() {
       Extrapolation.CLAMP
     );
     return {
-      source: { uri: DATA[currentImageIndex.value].image },
       blurRadius: withSpring(Math.floor(blurRadius)),
     };
   });
@@ -153,6 +208,18 @@ export default function CardsSwiping() {
     };
   });
 
+  const getCurrentIndex = () => indexState;
+
+  function scrollToIndex(index: number) {
+    imageSourceMutex.value = true;
+    index = clamp(index, 0, data.length - 1);
+    const newOffset = index * CARD_OFFSET;
+    scrollOffset.value = calculateScrollAnimationProgress(newOffset);
+    transitionProgress.value = withSpring(0.5, undefined, (finished) => {
+      scheduleOnRN(setImageSource, data[index].image);
+    });
+  }
+
   return (
     <View style={styles.root}>
       <GestureDetector gesture={panGesture}>
@@ -162,17 +229,24 @@ export default function CardsSwiping() {
           animatedProps={scrollViewProps}
           onScroll={scrollHandler}
           horizontal
-          removeClippedSubviews={true}
           style={styles.container}
           showsHorizontalScrollIndicator={false}
         >
           <Animated.View
-            style={[styles.wrapper, { width: CARD_OFFSET * DATA.length }]}
+            style={[styles.wrapper, { width: CARD_OFFSET * data.length }]}
           >
             {cards}
           </Animated.View>
         </Animated.ScrollView>
       </GestureDetector>
+      <CardsSwipingProvider
+        data={data}
+        extractKey={extractKey}
+        getCurrentIndex={getCurrentIndex}
+        scrollToIndex={scrollToIndex}
+      >
+        <IndicatorsWrapper data={data} />
+      </CardsSwipingProvider>
       <Animated.View style={styles.imageContainer}>
         <Animated.View style={[styles.imageMask, imageMaskStyle]} />
         <AnimatedImage
@@ -180,10 +254,43 @@ export default function CardsSwiping() {
           style={styles.cardImage}
           cachePolicy="memory-disk"
           priority="high"
+          source={{ uri: imageSource }}
           transition={{ duration: 100 }}
         />
       </Animated.View>
     </View>
+  );
+}
+
+export function IndicatorsWrapper({ data }: { data: { image: string }[] }) {
+  const context = useContext(CardsSwipingContext);
+  if (!context) {
+    throw new Error(
+      "IndicatorsWrapper must be used within a CardsSwipingProvider"
+    );
+  }
+  return (
+    <View style={styles.indicatorsContainer}>
+      {data.map((item, index) => (
+        <Indicator key={context.extractKey(item)} index={index} />
+      ))}
+    </View>
+  );
+}
+
+export function Indicator({ index }: { index: number }) {
+  const context = useContext(CardsSwipingContext);
+  if (!context) {
+    throw new Error("Indicator must be used within a CardsSwipingProvider");
+  }
+  const isCurrent = index === context.getCurrentIndex();
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: withSpring(isCurrent ? 1 : 0.5),
+  }));
+  return (
+    <TouchableWithoutFeedback onPress={() => context.scrollToIndex(index)}>
+      <Animated.View style={[styles.indicator, animatedStyle]} />
+    </TouchableWithoutFeedback>
   );
 }
 
@@ -219,7 +326,7 @@ const styles = StyleSheet.create({
   },
   card: {
     width: CART_WIDTH,
-    height: "60%",
+    top: GAP_WIDTH * 2,
     backgroundColor: "#ffffff",
     borderRadius: 32,
     padding: 16,
@@ -236,5 +343,22 @@ const styles = StyleSheet.create({
   cardImage: {
     width: "100%",
     height: "100%",
+  },
+  indicator: {
+    flex: 1,
+    height: 6,
+    borderRadius: 2,
+    backgroundColor: "#ffffff",
+  },
+  indicatorsContainer: {
+    flexDirection: "row",
+    gap: 8,
+    position: "absolute",
+    alignItems: "stretch",
+    justifyContent: "center",
+    top: GAP_WIDTH,
+    left: GAP_WIDTH,
+    right: GAP_WIDTH,
+    zIndex: 3,
   },
 });
