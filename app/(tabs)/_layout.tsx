@@ -38,6 +38,12 @@ export default function TabLayout() {
           title: "Swiping Cards",
         }}
       />
+      <Tabs.Screen
+        name="sensors"
+        options={{
+          title: "Sensors",
+        }}
+      />
     </Tabs>
   );
 }
