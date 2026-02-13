@@ -1,12 +1,15 @@
-import { movePointAlongOrbit } from "@/utils/animation-utils";
 import { Point } from "@/utils/animation-utils.types";
 import { useEffect } from "react";
 import { Dimensions, StyleSheet, View } from "react-native";
 import Animated, {
+  Easing,
   useAnimatedStyle,
-  useFrameCallback,
+  useDerivedValue,
   useSharedValue,
+  withRepeat,
+  withTiming,
 } from "react-native-reanimated";
+import { scheduleOnUI } from "react-native-worklets";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -26,36 +29,30 @@ const EARTH_ORBIT_RADIUS = EARTH_DIAMETER * 1.5;
 const SUN_ORBITAL_PERIOD_IN_MS = 5000;
 const EARTH_ORBITAL_PERIOD_IN_MS = 1000;
 
-function animateEarth({ elapsedTime }: { elapsedTime: number }): Point {
+function runOrbitalAnimation(orbitalPeriod: number): number {
   "worklet";
-  return movePointAlongOrbit({
-    center: {
-      x: SUN_CENTER_X - EARTH_DIAMETER * 0.5,
-      y: SUN_CENTER_Y - EARTH_DIAMETER * 0.5,
-    },
-    elapsedTime,
-    orbitalPeriod: SUN_ORBITAL_PERIOD_IN_MS,
-    radius: SUN_ORBIT_RADIUS,
-  });
+  return withRepeat(
+    withTiming(2 * Math.PI, {
+      duration: orbitalPeriod,
+      easing: Easing.linear,
+    }),
+    -1,
+    false
+  );
 }
 
-function animateMoon({
-  elapsedTime,
-  earthCoordinates,
-}: {
-  elapsedTime: number;
-  earthCoordinates: Point;
+function calculateCoordinates(params: {
+  angle: number;
+  radius: number;
+  center: Point;
+  offset?: Point;
 }): Point {
   "worklet";
-  return movePointAlongOrbit({
-    center: {
-      x: earthCoordinates.x + EARTH_DIAMETER * 0.5 - MOON_DIAMETER * 0.5,
-      y: earthCoordinates.y + EARTH_DIAMETER * 0.5 - MOON_DIAMETER * 0.5,
-    },
-    elapsedTime,
-    orbitalPeriod: EARTH_ORBITAL_PERIOD_IN_MS,
-    radius: EARTH_ORBIT_RADIUS,
-  });
+  const { angle, radius, center, offset = { x: 0, y: 0 } } = params;
+  return {
+    x: radius * Math.cos(angle) + center.x + offset.x,
+    y: radius * Math.sin(angle) + center.y + offset.y,
+  };
 }
 
 export type SolarSystemTopDownProps = {
@@ -65,50 +62,48 @@ export type SolarSystemTopDownProps = {
 export default function SolarSystemTopDown({
   isActive = true,
 }: SolarSystemTopDownProps) {
-  const earthOffsetX = useSharedValue(
-    SUN_CENTER_X - SUN_ORBIT_RADIUS + EARTH_DIAMETER * 0.5
-  );
-  const earthOffsetY = useSharedValue(
-    SUN_CENTER_Y - SUN_ORBIT_RADIUS + EARTH_DIAMETER * 0.5
+  const sunAngle = useSharedValue(0);
+  const earthAngle = useSharedValue(0);
+
+  const earthCoordinates = useDerivedValue(() =>
+    calculateCoordinates({
+      angle: sunAngle.get(),
+      radius: SUN_ORBIT_RADIUS,
+      center: { x: SUN_CENTER_X, y: SUN_CENTER_Y },
+      offset: { x: -EARTH_DIAMETER * 0.5, y: -EARTH_DIAMETER * 0.5 },
+    })
   );
 
-  const moonOffsetX = useSharedValue(
-    earthOffsetX.get() - EARTH_ORBIT_RADIUS + MOON_DIAMETER * 0.5
+  const moonCoordinates = useDerivedValue(() =>
+    calculateCoordinates({
+      angle: earthAngle.get(),
+      radius: EARTH_ORBIT_RADIUS,
+      center: earthCoordinates.get(),
+      offset: {
+        x: EARTH_DIAMETER * 0.5 - MOON_DIAMETER * 0.5,
+        y: EARTH_DIAMETER * 0.5 - MOON_DIAMETER * 0.5,
+      },
+    })
   );
-  const moonOffsetY = useSharedValue(
-    earthOffsetY.get() - EARTH_ORBIT_RADIUS + MOON_DIAMETER * 0.5
-  );
-
-  const frameCallback = useFrameCallback((frame) => {
-    const earthCoordinates = animateEarth({
-      elapsedTime: frame.timeSinceFirstFrame,
-    });
-    const moonCenter = animateMoon({
-      elapsedTime: frame.timeSinceFirstFrame,
-      earthCoordinates,
-    });
-    earthOffsetX.set(earthCoordinates.x);
-    earthOffsetY.set(earthCoordinates.y);
-    moonOffsetX.set(moonCenter.x);
-    moonOffsetY.set(moonCenter.y);
-  }, false);
 
   useEffect(() => {
-    frameCallback.setActive(isActive);
-    return () => frameCallback.setActive(false);
-  }, [frameCallback, isActive]);
+    scheduleOnUI(() => {
+      sunAngle.set(runOrbitalAnimation(SUN_ORBITAL_PERIOD_IN_MS));
+      earthAngle.set(runOrbitalAnimation(EARTH_ORBITAL_PERIOD_IN_MS));
+    });
+  }, []);
 
   const earthAnimatedStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateY: earthOffsetY.get() },
-      { translateX: earthOffsetX.get() },
+      { translateX: earthCoordinates.get().x },
+      { translateY: earthCoordinates.get().y },
     ],
   }));
 
   const moonAnimatedStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateY: moonOffsetY.get() },
-      { translateX: moonOffsetX.get() },
+      { translateX: moonCoordinates.get().x },
+      { translateY: moonCoordinates.get().y },
     ],
   }));
 
