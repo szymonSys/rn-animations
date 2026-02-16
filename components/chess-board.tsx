@@ -2,18 +2,15 @@ import { View, StyleSheet, Dimensions, Text } from "react-native";
 import type {
   BoardConfig,
   PieceSymbol,
-  Piece,
   Color,
-  PieceType,
   Row,
   Column,
 } from "js-chess-engine";
 
 import { move, moves, ai, status, Game } from "js-chess-engine";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Animated, {
   SharedValue,
-  useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -21,8 +18,6 @@ import Animated, {
 } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { scheduleOnRN } from "react-native-worklets";
-
-const initialBoardConfig = new Game().exportJson();
 
 enum SquareColor {
   BLACK = "squareBlack",
@@ -40,18 +35,31 @@ type PieceProperties = {
   piece: PieceSymbol;
 };
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-
-const BOARD_WIDTH = SCREEN_WIDTH * 0.9;
-const BOARD_HEIGHT = BOARD_WIDTH;
-const SQUARE_SIZE = BOARD_WIDTH / 8;
-
-const COLUMNS: Column[] = ["A", "B", "C", "D", "E", "F", "G", "H"];
+type SquareProperties = {
+  id: Position;
+  styleClassName: SquareColor;
+  row: Row;
+  column: Column;
+  coords: Point;
+};
 
 type Position = `${Column}${Row}`;
 type CoordKey = `${Point["x"]}:${Point["y"]}`;
 
 type PiecesPropertiesMap = Partial<Record<Position, PieceProperties>>;
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
+const BOARD_SIZE = SCREEN_WIDTH * 0.9;
+const SQUARE_SIZE = BOARD_SIZE / 8;
+const PIECE_SIZE = SQUARE_SIZE * 0.9;
+const SQUARE_MIDDLE = SQUARE_SIZE / 2;
+const PIECE_OFFSET = SQUARE_MIDDLE - PIECE_SIZE / 2;
+const COLUMNS: Column[] = ["A", "B", "C", "D", "E", "F", "G", "H"];
+
+function initializeBoardConfig(): BoardConfig {
+  return new Game().exportJson();
+}
 
 function alignPieceToSquare(pieceCoord: Point): Point {
   "worklet";
@@ -78,22 +86,24 @@ function checkIfPointIsWithinBoard(point: Point): boolean {
   "worklet";
   return !(
     point.x < 0 ||
-    point.x > BOARD_WIDTH ||
+    point.x > BOARD_SIZE ||
     point.y < 0 ||
-    point.y > BOARD_HEIGHT
+    point.y > BOARD_SIZE
   );
 }
 
-const BOARD = Array.from({ length: 8 * 8 }).map((_, index) => {
-  const { row, column } = getSquareCoordinates(index);
-  return {
-    id: `${column}${row}` as Position,
-    styleClassName: getSquareColor(index),
-    row,
-    column,
-    coords: getSquarePoint(index),
-  };
-});
+const BOARD: readonly SquareProperties[] = Array.from({ length: 8 * 8 }).map(
+  (_, index) => {
+    const { row, column } = getSquareCoordinates(index);
+    return {
+      id: `${column}${row}` as Position,
+      styleClassName: getSquareColor(index),
+      row,
+      column,
+      coords: getSquarePoint(index),
+    };
+  }
+);
 
 const coordsToPositionsMap = new Map<CoordKey, Position>(
   BOARD.map((square) => [getCoordKey(square.coords), square.id])
@@ -102,18 +112,6 @@ const coordsToPositionsMap = new Map<CoordKey, Position>(
 const positionsToCoordsMap = new Map<Position, CoordKey>(
   BOARD.map((square) => [square.id, getCoordKey(square.coords)])
 );
-
-function positionPiece(sourceCoord: Point): {
-  coord: Point;
-  position: Position;
-} {
-  const coord = alignPieceToSquare(sourceCoord);
-  const position = coordsToPositionsMap.get(getCoordKey(coord));
-  if (!position) {
-    throw new Error(`Position not found for coord: ${getCoordKey(coord)}`);
-  }
-  return { coord, position };
-}
 
 function transformCoordKeyToPoint(coordKey: CoordKey): Point {
   const [x, y] = coordKey.split(":");
@@ -176,8 +174,9 @@ function drawPlayerColor(): Color {
 }
 
 export default function ChessBoard() {
-  const [boardConfig, setBoardConfig] =
-    useState<BoardConfig>(initialBoardConfig);
+  const [boardConfig, setBoardConfig] = useState<BoardConfig>(() =>
+    initializeBoardConfig()
+  );
 
   const playerColor = useMemo(() => drawPlayerColor(), []);
 
@@ -199,7 +198,6 @@ export default function ChessBoard() {
   );
 
   const startPieceCoords = useSharedValue<Point | null>(null);
-
   const activePieceOffsetX = useSharedValue<number>(0);
   const activePieceOffsetY = useSharedValue<number>(0);
   const activePiecePosition = useSharedValue<Position | null>(null);
@@ -253,7 +251,7 @@ export default function ChessBoard() {
     activePieceOffsetY.value = withTiming(
       toSquareCoords.y - fromSquareCoords.y,
       { duration: 1000 },
-      (finished) => {
+      () => {
         scheduleOnRN(handlePlayerGameMove, from, to, newBoardConfig);
       }
     );
@@ -317,8 +315,8 @@ export default function ChessBoard() {
         return;
       }
       const squareCoords = alignPieceToSquare({
-        x: piecePositionX + SQUARE_SIZE / 2 - (SQUARE_SIZE * 0.9) / 2,
-        y: piecePositionY + SQUARE_SIZE / 2 - (SQUARE_SIZE * 0.9) / 2,
+        x: piecePositionX + SQUARE_MIDDLE,
+        y: piecePositionY + SQUARE_MIDDLE,
       });
       const targetPosition = coordsToPositionsMap.get(
         getCoordKey(squareCoords)
@@ -343,7 +341,7 @@ export default function ChessBoard() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.playerColor}>{playerColor}</Text>
+      <Text style={styles.playerColor}>Current player: {playerColor}</Text>
       <Text style={styles.playerColor}>
         {isPlayerTurn ? "Your turn" : "Opponent's turn"}
       </Text>
@@ -389,23 +387,18 @@ function PieceItem({
           translateX: withSpring(
             pieceProperties.coord.x +
               (isActive ? activePieceOffsetX.value : 0) +
-              SQUARE_SIZE / 2 -
-              (SQUARE_SIZE * 0.9) / 2
+              PIECE_OFFSET
           ),
         },
         {
           translateY: withSpring(
             pieceProperties.coord.y +
               (isActive ? activePieceOffsetY.value : 0) +
-              SQUARE_SIZE / 2 -
-              (SQUARE_SIZE * 0.9) / 2
+              PIECE_OFFSET
           ),
         },
         {
           scale: withSpring(isActive ? 1.2 : 1),
-        },
-        {
-          rotate: isActive ? "15deg" : "0deg",
         },
       ],
     };
@@ -444,8 +437,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   board: {
-    width: BOARD_WIDTH,
-    height: BOARD_HEIGHT,
+    width: BOARD_SIZE,
+    height: BOARD_SIZE,
     backgroundColor: "#333333",
     position: "relative",
     flexDirection: "row",
@@ -467,8 +460,8 @@ const styles = StyleSheet.create({
     color: "#f1cd0f",
   },
   piece: {
-    width: SQUARE_SIZE * 0.9,
-    height: SQUARE_SIZE * 0.9,
+    width: PIECE_SIZE,
+    height: PIECE_SIZE,
     alignItems: "center",
     justifyContent: "center",
     position: "absolute",
@@ -480,7 +473,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
-    borderRadius: SQUARE_SIZE,
+    borderRadius: PIECE_SIZE,
   },
   pieceWhite: {
     backgroundColor: "#f3f3f3",
