@@ -234,9 +234,6 @@ export default function ChessBoard() {
     const { board: newBoardConfig, move } = ai(boardConfig, { play: false });
     const [from] = Object.keys(move) as [Position];
     const to = move[from] as Position;
-    console.log("from", from);
-    console.log("to", to);
-
     const fromSquareCoordsKey = positionsToCoordsMap.get(from);
     const toSquareCoordsKey = positionsToCoordsMap.get(to);
     if (!fromSquareCoordsKey || !toSquareCoordsKey) {
@@ -244,10 +241,6 @@ export default function ChessBoard() {
     }
     const fromSquareCoords = transformCoordKeyToPoint(fromSquareCoordsKey);
     const toSquareCoords = transformCoordKeyToPoint(toSquareCoordsKey);
-
-    console.log("fromSquareCoords", fromSquareCoords);
-    console.log("toSquareCoords", toSquareCoords);
-
     if (!fromSquareCoords || !toSquareCoords) {
       return;
     }
@@ -360,9 +353,7 @@ export default function ChessBoard() {
             <View
               key={square.id}
               style={[styles.square, styles[square.styleClassName]]}
-            >
-              <Text style={styles.squareText}>{square.id}</Text>
-            </View>
+            />
           ))}
           {Object.values(piecesProperties).map((pieceProperties) => (
             <PieceItem
@@ -423,7 +414,16 @@ function PieceItem({
         animatedStyle,
       ]}
     >
-      <Text style={styles.pieceText}>{pieceProperties.piece}</Text>
+      <Text
+        style={[
+          styles.pieceText,
+          isPieceWhite(pieceProperties.piece)
+            ? styles.pieceTextWhite
+            : styles.pieceTextBlack,
+        ]}
+      >
+        {pieceProperties.piece}
+      </Text>
     </Animated.View>
   );
 }
@@ -433,7 +433,7 @@ const styles = StyleSheet.create({
     flex: 1,
     width: "100%",
     height: "100%",
-    backgroundColor: "#f1cd0f",
+    backgroundColor: "skyblue",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -461,25 +461,43 @@ const styles = StyleSheet.create({
     color: "#f1cd0f",
   },
   piece: {
-    width: SQUARE_SIZE / 2,
-    height: SQUARE_SIZE * 0.75,
+    width: SQUARE_SIZE * 0.9,
+    height: SQUARE_SIZE * 0.9,
     alignItems: "center",
     justifyContent: "center",
     position: "absolute",
     top: 0,
     left: 0,
     zIndex: 2,
+    shadowColor: "black",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+    borderRadius: SQUARE_SIZE,
   },
   pieceWhite: {
-    backgroundColor: "blue",
+    backgroundColor: "#f3f3f3",
+    color: "black",
+    borderWidth: 1,
+    borderColor: "#333333",
   },
   pieceBlack: {
-    backgroundColor: "red",
+    backgroundColor: "#333333",
+    color: "white",
+    borderWidth: 1,
+    borderColor: "#f3f3f3",
   },
   pieceText: {
-    fontSize: 13,
+    fontSize: 18,
     fontWeight: "bold",
-    color: "white",
+    textTransform: "uppercase",
+  },
+  pieceTextWhite: {
+    color: "#333333",
+  },
+  pieceTextBlack: {
+    color: "#f3f3f3",
   },
   playerColor: {
     fontSize: 20,
