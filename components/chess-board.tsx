@@ -252,14 +252,13 @@ export default function ChessBoard() {
       return;
     }
     activePiecePosition.value = from;
-    startPieceCoords.value = fromSquareCoords;
 
     activePieceOffsetX.value = withTiming(
-      startPieceCoords.value.x - toSquareCoords.x,
+      toSquareCoords.x - fromSquareCoords.x,
       { duration: 1000 }
     );
     activePieceOffsetY.value = withTiming(
-      startPieceCoords.value.y - toSquareCoords.y,
+      toSquareCoords.y - fromSquareCoords.y,
       { duration: 1000 },
       (finished) => {
         scheduleOnRN(handlePlayerGameMove, from, to, newBoardConfig);
