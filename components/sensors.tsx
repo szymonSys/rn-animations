@@ -2,7 +2,6 @@ import { StyleSheet, View } from "react-native";
 import Animated, {
   SensorType,
   clamp,
-  useAnimatedReaction,
   useAnimatedSensor,
   useAnimatedStyle,
   useDerivedValue,
@@ -10,9 +9,15 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 
-const CHANGE_THRESHOLD = 0.03;
-const SENSOR_INTERVAL_MS = 20;
+const CHANGE_THRESHOLD = 0.01;
+const SENSOR_INTERVAL_MS = 10;
 const CHANGE_THRESHOLD_RADIANS = CHANGE_THRESHOLD * 2 * Math.PI;
+
+function toPrecision(value: number, precision: number = 1): number {
+  "worklet";
+  const base = Math.pow(10, precision);
+  return Math.round(value * base) / base;
+}
 
 function normalizeRadians(angle: number): number {
   "worklet";
@@ -50,36 +55,33 @@ export function Sensors() {
   });
   const previousYaw = useSharedValue<number | null>(null);
   const accumulatedYaw = useSharedValue(0);
+  const baselineYaw = useSharedValue<number | null>(null);
 
   const currentYaw = useDerivedValue(() => {
     accumulatedYaw.value = calculateYawFromGyroscope(
       sensor.value.z,
       accumulatedYaw.value
     );
-    const value = adjustRotationValue(previousYaw.value, accumulatedYaw.value);
-    if (value !== previousYaw.value) {
-      previousYaw.value = value;
+    const rawYaw = adjustRotationValue(previousYaw.value, accumulatedYaw.value);
+    if (rawYaw !== previousYaw.value) {
+      previousYaw.value = rawYaw;
     }
-    return value;
+    if (baselineYaw.value === null) {
+      baselineYaw.value = rawYaw;
+    }
+    return normalizeRadians(rawYaw - baselineYaw.value);
   });
 
   const animatedYaw = useDerivedValue(() => {
     return withSpring(clamp(currentYaw.value, -Math.PI / 2, Math.PI / 2));
   });
 
-  useAnimatedReaction(
-    () => animatedYaw.value,
-    (value) => {
-      console.log("animatedYaw", value);
-    }
-  );
-
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${-animatedYaw.value / 4}rad` }],
+    transform: [{ rotate: `${-toPrecision(animatedYaw.value, 2)}rad` }],
   }));
 
   const treeAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${animatedYaw.value / 3}rad` }],
+    transform: [{ rotate: `${toPrecision(animatedYaw.value, 2)}rad` }],
   }));
 
   return (
