@@ -317,8 +317,8 @@ export default function ChessBoard() {
         return;
       }
       const squareCoords = alignPieceToSquare({
-        x: piecePositionX,
-        y: piecePositionY,
+        x: piecePositionX + SQUARE_SIZE / 2 - (SQUARE_SIZE * 0.9) / 2,
+        y: piecePositionY + SQUARE_SIZE / 2 - (SQUARE_SIZE * 0.9) / 2,
       });
       const targetPosition = coordsToPositionsMap.get(
         getCoordKey(squareCoords)
@@ -387,12 +387,18 @@ function PieceItem({
       transform: [
         {
           translateX: withSpring(
-            pieceProperties.coord.x + (isActive ? activePieceOffsetX.value : 0)
+            pieceProperties.coord.x +
+              (isActive ? activePieceOffsetX.value : 0) +
+              SQUARE_SIZE / 2 -
+              (SQUARE_SIZE * 0.9) / 2
           ),
         },
         {
           translateY: withSpring(
-            pieceProperties.coord.y + (isActive ? activePieceOffsetY.value : 0)
+            pieceProperties.coord.y +
+              (isActive ? activePieceOffsetY.value : 0) +
+              SQUARE_SIZE / 2 -
+              (SQUARE_SIZE * 0.9) / 2
           ),
         },
         {
