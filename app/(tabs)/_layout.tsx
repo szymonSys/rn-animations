@@ -32,6 +32,18 @@ export default function TabLayout() {
           title: "Bouncing Ball",
         }}
       />
+      <Tabs.Screen
+        name="cards-swiping"
+        options={{
+          title: "Swiping Cards",
+        }}
+      />
+      <Tabs.Screen
+        name="sensors"
+        options={{
+          title: "Sensors",
+        }}
+      />
     </Tabs>
   );
 }
